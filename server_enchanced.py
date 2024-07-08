@@ -1,16 +1,25 @@
+import os
 import socket
 import threading
 import time
-from DH import *
+import pygame.camera
 
+from DH import *
 from cryptography.hazmat.backends import default_backend
+from Compress import Compress
+from Watermarking import *
+from enc import encrypt_image
+from dec import decrypt_image
+
+
+
 
 class Server():
 
 
     def __init__(self):
         self.port = 5555
-        self.ip_address = "192.168.1.102" #socket.gethostbyname(socket.gethostname())
+        self.ip_address = "192.168.1.103" #socket.gethostbyname(socket.gethostname())
         self.name = socket.gethostname()
         self.format = "UTF-8"
         self.disconnect_msg = "#DIS"
@@ -19,6 +28,7 @@ class Server():
         self.server = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
         self.clients = []
         self.image_num = 0
+        self.authenticate(self.server)
 
     def init_Server(self):
         self.server.bind(self.address)
@@ -40,7 +50,45 @@ class Server():
                 threading.Thread(target=self.recieve_msg,args=[conn]).start()
             
 
+    
+    def key_exchange(self,conn:socket.socket) -> bytes:
+        try:
+            for i in range(3):
+                
+                    key_generate = DH()
+                
+                    key_generate.generate_dh_key_pair()
+                    public_server = key_generate.generate_dh_key_pair()
+
+                    print("[SERVER]sending public key to client!")
+                    
+                    conn.send(public_server)
+                    client_public = conn.recv(self.header)
+                    return key_generate.compute_shared_secret(client_public)
+            x = 0
+        
+            
+            return x.to_bytes()
+        except Exception as err:
+            print(f"[SERVER]Error happened {err}")
+            x = 0
+            return x.to_bytes()
+
+    def authenticate(self,conn:socket.socket) -> bool:
+        global key
+        key = self.key_exchange(conn)
+        
+        print(f"[Server]key:{key} ")
+        if key == 0:
+            return False
+        else:
+            
+            return True
+
     def recieve_msg(self,conn:socket.socket):
+
+        if not self.authenticate(conn):
+            return
 
         while True:
             try:
@@ -86,12 +134,12 @@ class Server():
 
             except:
                 print("[SERVER]Couldn't read file please try again!")
-
+                
             if image_chunk:
                 print("[SERVER]Sending image....")
 
             try:
-                while image_chunk:
+                while image_chunk :
                     self.clients[client_num].send(image_chunk)
                     image_chunk = file.read(self.header)
                     
@@ -105,39 +153,55 @@ class Server():
             print("[SERVER]Error couldn't send file!")
             print("[SERVER]Please Try again in 5s")
             time.sleep(5)
-        
-    def exchange_key(self,client:int,params:int):
-        key = 0
+
+    def send_file(self):
+        CHUNKSIZE = 1_000_000
+        filename = input('File to upload: ')
+        f = open(filename,'rb') 
+        self.clients[0].sendall(filename.encode() + b'\n')
+        self.clients[0].sendall(f'{os.path.getsize(filename)}'.encode() + b'\n')
+
+    # Send the file in chunks so large files can be handled.
         while True:
-            self.clients[client].send(str(params))
-            ack_msg = self.clients[client].recv()
-            if ack_msg == "ACK_PARAMS":
-                client_pk = self.clients[client].recv(self.header)
-                key = client_pk
-                break
-        
-        return int(key)
-    
+            data = f.read(CHUNKSIZE)
+            if not data: break
+            self.clients[0].sendall(data)
+        f.close()
+
 
 
 s = Server()
 s.init_Server()
+pygame.camera.init()
+camlist = pygame.camera.list_cameras()
+
+
+
+
+
 
 
 
 
 while True:
-    
-    
-    
-    #priv_k,pub_k = generate_dh_key_pair(params)
-    #bytez = pub_k.public_numbers().y.to_bytes(2048,'big')
-    #dh.DHParameterNumbers()
-    #x = input()
-    
-    s.send_message(0,"hello")
-    time.sleep(5)
-    #s.send_img(x.strip(),0)
-    
 
+    if camlist:
+    
+        # Initialize and start camera  
+        cam = pygame.camera.Camera(camlist[0], (640, 480))
+        cam.start()
+        
+        # capturing the single image
+        image = cam.get_image()
+        
+        # saving the image
+        pygame.image.save(image, "filename.png")
+        cam.stop()
+    else:
+        print("Error Camera not found!")
+
+    Compress("filename.png","filename.png")
+    wm = Watermarking("filename.png")
+    wm.embed_watermark()
+    encrypt_image("filename.png","filenameEnc.png",key)
     
